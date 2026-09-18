@@ -1,0 +1,82 @@
+name: n8n Video Renderer
+
+# Listens for a POST request from your n8n workflow
+on:
+  repository_dispatch:
+    types: [render_reel]
+
+jobs:
+  build-video:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        # This gives the server access to your bg.jpg file
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install System Dependencies
+        # FFmpeg handles video, edge-tts handles audio, jq parses JSON
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg jq fonts-dejavu
+          pip install edge-tts
+
+      - name: Extract n8n Payload
+        # Grabs the data sent from your n8n HTTP Request node
+        env:
+          SCRIPT: ${{ github.event.client_payload.script }}
+          AVATAR_URL: ${{ github.event.client_payload.avatar_url }}
+          N8N_WEBHOOK: ${{ github.event.client_payload.webhook_url }}
+        run: |
+          echo "$SCRIPT" > script.txt
+          echo "$AVATAR_URL" > avatar.txt
+          echo "$N8N_WEBHOOK" > webhook.txt
+
+      - name: Download GitHub Repo Avatar
+        run: |
+          wget -O avatar.png "$(cat avatar.txt)"
+
+      - name: Synthesize Voiceover
+        run: |
+          edge-tts --voice "en-US-ChristopherNeural" --text "$(cat script.txt)" --write-media audio.mp3
+
+      - name: Render Video (FFmpeg)
+        # 1. Loops background (bg.jpg)
+        # 2. Scales avatar to 350x350 and centers it
+        # 3. Adds the MP3 audio
+        # 4. format=yuv420p ensures Meta/Instagram accepts the file
+        # 5. -shortest cuts the video exactly when the audio finishes
+        run: |
+          ffmpeg -loop 1 -i bg.jpg -i avatar.png -i audio.mp3 -filter_complex \
+          "[1:v]scale=350:350[ava]; \
+           [0:v][ava]overlay=(W-w)/2:(H-h)/2:format=yuv420p[v]" \
+          -map "[v]" -map 2:a -c:v libx264 -c:a aac -shortest -y output.mp4
+
+      - name: Upload for Meta & Get Raw URL
+        id: upload
+        # Uploads to tmpfiles.org for a free, temporary direct download link
+        run: |
+          # Upload the file
+          UPLOAD_RES=$(curl -s -F "file=@output.mp4" https://tmpfiles.org/api/v1/upload)
+          
+          # Parse the URL and convert it to a raw direct link for Meta's API
+          PAGE_URL=$(echo $UPLOAD_RES | jq -r '.data.url')
+          DIRECT_URL="${PAGE_URL/tmpfiles.org\//tmpfiles.org/dl/}"
+          
+          echo "Video temporarily hosted at: $DIRECT_URL"
+          echo "url=$DIRECT_URL" >> $GITHUB_OUTPUT
+
+      - name: Ping n8n Webhook
+        # Sends the direct video URL back to the waiting n8n node
+        env:
+          VIDEO_URL: ${{ steps.upload.outputs.url }}
+        run: |
+          N8N_URL=$(cat webhook.txt)
+          curl -X POST -H "Content-Type: application/json" \
+            -d "{\"video_url\": \"$VIDEO_URL\", \"status\": \"success\"}" \
+            $N8N_URL
