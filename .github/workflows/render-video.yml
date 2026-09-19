@@ -12,29 +12,42 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        # This gives the server access to your bg.jpg file
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install System Dependencies
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install System & Media Dependencies
         # FFmpeg handles video, edge-tts handles audio, jq parses JSON
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq fonts-dejavu
           pip install edge-tts
 
+      - name: Install Playwright
+        # Playwright and its browser dependencies for screen recording
+        run: |
+          npm install playwright
+          npx playwright install --with-deps chromium
+
       - name: Extract n8n Payload
         # Grabs the data sent from your n8n HTTP Request node
+        # Make sure n8n sends "repo_url" in the client_payload!
         env:
           SCRIPT: ${{ github.event.client_payload.script }}
           AVATAR_URL: ${{ github.event.client_payload.avatar_url }}
+          REPO_URL: ${{ github.event.client_payload.repo_url }}
           N8N_WEBHOOK: ${{ github.event.client_payload.webhook_url }}
         run: |
           echo "$SCRIPT" > script.txt
           echo "$AVATAR_URL" > avatar.txt
+          echo "$REPO_URL" > repo.txt
           echo "$N8N_WEBHOOK" > webhook.txt
 
       - name: Download GitHub Repo Avatar
@@ -45,14 +58,57 @@ jobs:
         run: |
           edge-tts --voice "en-US-ChristopherNeural" --text "$(cat script.txt)" --write-media audio.mp3
 
+      - name: Generate Playwright Script
+        # Creates the scrolling script dynamically so you don't need a separate repo file
+        run: |
+          cat << 'EOF' > record-scroll.js
+          const { chromium } = require('playwright');
+          (async () => {
+            const targetUrl = process.argv[2] || 'https://github.com';
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext({
+              viewport: { width: 1080, height: 1920 }, // 9:16 vertical video
+              recordVideo: { dir: './', size: { width: 1080, height: 1920 } }
+            });
+            const page = await context.newPage();
+            await page.goto(targetUrl, { waitUntil: 'networkidle' });
+            
+            await page.evaluate(async () => {
+              await new Promise((resolve) => {
+                let totalHeight = 0;
+                const distance = 5; 
+                const timer = setInterval(() => {
+                  const scrollHeight = document.body.scrollHeight;
+                  window.scrollBy(0, distance);
+                  totalHeight += distance;
+                  // Stop after ~60 seconds or end of page
+                  if (totalHeight >= scrollHeight || totalHeight >= (distance * 3000)) {
+                    clearInterval(timer);
+                    resolve();
+                  }
+                }, 20);
+              });
+            });
+            await context.close();
+            await browser.close();
+          })();
+          EOF
+
+      - name: Record Scrolling Background
+        run: |
+          # Run the generated script with the repo URL
+          node record-scroll.js "$(cat repo.txt)"
+          # Playwright saves a randomly named .webm file, rename it for ffmpeg
+          mv *.webm background.webm
+
       - name: Render Video (FFmpeg)
-        # 1. Loops background (bg.jpg)
+        # 1. -stream_loop -1 loops the background video if it's shorter than the audio
         # 2. Scales avatar to 350x350 and centers it
         # 3. Adds the MP3 audio
         # 4. format=yuv420p ensures Meta/Instagram accepts the file
         # 5. -shortest cuts the video exactly when the audio finishes
         run: |
-          ffmpeg -loop 1 -i bg.JPG -i avatar.png -i audio.mp3 -filter_complex \
+          ffmpeg -stream_loop -1 -i background.webm -i avatar.png -i audio.mp3 -filter_complex \
           "[1:v]scale=350:350[ava]; \
            [0:v][ava]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]" \
           -map "[v]" -map 2:a -c:v libx264 -c:a aac -shortest -y output.mp4
@@ -61,10 +117,7 @@ jobs:
         id: upload
         # Uploads to tmpfiles.org for a free, temporary direct download link
         run: |
-          # Upload the file
           UPLOAD_RES=$(curl -s -F "file=@output.mp4" https://tmpfiles.org/api/v1/upload)
-          
-          # Parse the URL and convert it to a raw direct link for Meta's API
           PAGE_URL=$(echo $UPLOAD_RES | jq -r '.data.url')
           DIRECT_URL="${PAGE_URL/tmpfiles.org\//tmpfiles.org/dl/}"
           
