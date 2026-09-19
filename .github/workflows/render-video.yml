@@ -24,7 +24,7 @@ jobs:
           node-version: '18'
 
       - name: Install System & Media Dependencies
-        # FFmpeg handles video, edge-tts handles audio, jq parses JSON
+        # FFmpeg handles video, edge-tts handles audio, jq parses JSON, fonts-dejavu for subtitles
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq fonts-dejavu
@@ -38,25 +38,19 @@ jobs:
 
       - name: Extract n8n Payload
         # Grabs the data sent from your n8n HTTP Request node
-        # Make sure n8n sends "repo_url" in the client_payload!
         env:
           SCRIPT: ${{ github.event.client_payload.script }}
-          AVATAR_URL: ${{ github.event.client_payload.avatar_url }}
           REPO_URL: ${{ github.event.client_payload.repo_url }}
           N8N_WEBHOOK: ${{ github.event.client_payload.webhook_url }}
         run: |
           echo "$SCRIPT" > script.txt
-          echo "$AVATAR_URL" > avatar.txt
           echo "$REPO_URL" > repo.txt
           echo "$N8N_WEBHOOK" > webhook.txt
 
-      - name: Download GitHub Repo Avatar
+      - name: Synthesize Voiceover & Subtitles
+        # Generates the MP3 audio AND a matching WebVTT subtitle file
         run: |
-          wget -O avatar.png "$(cat avatar.txt)"
-
-      - name: Synthesize Voiceover
-        run: |
-          edge-tts --voice "en-US-ChristopherNeural" --text "$(cat script.txt)" --write-media audio.mp3
+          edge-tts --voice "en-US-ChristopherNeural" --text "$(cat script.txt)" --write-media audio.mp3 --write-subtitles subtitles.vtt
 
       - name: Generate Playwright Script
         # Creates the scrolling script dynamically so you don't need a separate repo file
@@ -101,17 +95,16 @@ jobs:
           # Playwright saves a randomly named .webm file, rename it for ffmpeg
           mv *.webm background.webm
 
-      - name: Render Video (FFmpeg)
+      - name: Render Video with Subtitles (FFmpeg)
         # 1. -stream_loop -1 loops the background video if it's shorter than the audio
-        # 2. Scales avatar to 350x350 and centers it
-        # 3. Adds the MP3 audio
-        # 4. format=yuv420p ensures Meta/Instagram accepts the file
+        # 2. format=yuv420p ensures Meta/Instagram accepts the file
+        # 3. subtitles=subtitles.vtt burns the generated text into the video
+        # 4. force_style sets font size (64), centers it (Alignment=2), and adds a black outline
         # 5. -shortest cuts the video exactly when the audio finishes
         run: |
-          ffmpeg -stream_loop -1 -i background.webm -i avatar.png -i audio.mp3 -filter_complex \
-          "[1:v]scale=350:350[ava]; \
-           [0:v][ava]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]" \
-          -map "[v]" -map 2:a -c:v libx264 -c:a aac -shortest -y output.mp4
+          ffmpeg -stream_loop -1 -i background.webm -i audio.mp3 -vf \
+          "format=yuv420p,subtitles=subtitles.vtt:force_style='Fontname=DejaVu Sans,FontSize=64,Alignment=2,MarginV=250,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=4'" \
+          -c:v libx264 -c:a aac -shortest -y output.mp4
 
       - name: Upload for Meta & Get Raw URL
         id: upload
