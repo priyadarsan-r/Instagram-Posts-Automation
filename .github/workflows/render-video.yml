@@ -109,12 +109,24 @@ jobs:
           
           for block in blocks[1:]:
               lines = block.split('\n')
-              if len(lines) < 2: continue
-              times = lines[0]
-              text = " ".join(lines[1:])
+              
+              # Find the timestamp line safely
+              time_idx = -1
+              for i, line in enumerate(lines):
+                  if '-->' in line:
+                      time_idx = i
+                      break
+                      
+              # If no timestamp found, keep block as is (e.g., metadata)
+              if time_idx == -1:
+                  new_blocks.append(block)
+                  continue
+                  
+              times = lines[time_idx]
+              text = " ".join(lines[time_idx+1:]).replace('\n', ' ')
               words = text.split()
               
-              max_words = 8 # Limit to 8 words to guarantee max 2 lines
+              max_words = 8 # Limit to 8 words
               
               if len(words) <= max_words:
                   new_blocks.append(block)
@@ -124,9 +136,10 @@ jobs:
               
               # Time parsing helpers
               def parse_t(t):
-                  h, m, s = t.split(':')
+                  h, m, s = t.strip().split(':')
                   s, ms = s.split('.')
                   return int(h)*3600000 + int(m)*60000 + int(s)*1000 + int(ms)
+                  
               def format_t(ms):
                   h = int(ms // 3600000)
                   ms %= 3600000
@@ -139,7 +152,7 @@ jobs:
               start_ms = parse_t(t_start)
               end_ms = parse_t(t_end)
               duration = end_ms - start_ms
-              time_per_word = duration / len(words)
+              time_per_word = duration / max(len(words), 1)
               
               curr_start = start_ms
               for i in range(0, len(words), max_words):
@@ -147,6 +160,7 @@ jobs:
                   chunk_text = " ".join(chunk_words)
                   chunk_duration = time_per_word * len(chunk_words)
                   curr_end = curr_start + chunk_duration
+                  
                   new_blocks.append(f"{format_t(curr_start)} --> {format_t(curr_end)}\n{chunk_text}")
                   curr_start = curr_end
                   
