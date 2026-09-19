@@ -99,11 +99,11 @@ jobs:
         # 1. -stream_loop -1 loops the background video if it's shorter than the audio
         # 2. format=yuv420p ensures Meta/Instagram accepts the file
         # 3. subtitles=subtitles.vtt burns the generated text into the video
-        # 4. force_style sets font size (64), centers it (Alignment=2), and adds a black outline
+        # 4. force_style is adjusted: FontSize=24 and MarginV=40 keeps it readable at the bottom
         # 5. -shortest cuts the video exactly when the audio finishes
         run: |
           ffmpeg -stream_loop -1 -i background.webm -i audio.mp3 -vf \
-          "format=yuv420p,subtitles=subtitles.vtt:force_style='Fontname=DejaVu Sans,FontSize=64,Alignment=2,MarginV=250,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=4'" \
+          "format=yuv420p,subtitles=subtitles.vtt:force_style='Fontname=DejaVu Sans,FontSize=24,Alignment=2,MarginV=40,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2'" \
           -c:v libx264 -c:a aac -shortest -y output.mp4
 
       - name: Upload for Meta & Get Raw URL
