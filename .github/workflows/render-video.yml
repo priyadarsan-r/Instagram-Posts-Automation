@@ -95,6 +95,66 @@ jobs:
           # Playwright saves a randomly named .webm file, rename it for ffmpeg
           mv *.webm background.webm
 
+      - name: Limit Subtitle Length (Python)
+        # Slices the VTT file so no subtitle exceeds 8 words
+        run: |
+          cat << 'EOF' > fix_subs.py
+          import re
+          
+          with open('subtitles.vtt', 'r', encoding='utf-8') as f:
+              content = f.read()
+              
+          blocks = re.split(r'\n\n+', content.strip())
+          new_blocks = [blocks[0]] # Keep WEBVTT header
+          
+          for block in blocks[1:]:
+              lines = block.split('\n')
+              if len(lines) < 2: continue
+              times = lines[0]
+              text = " ".join(lines[1:])
+              words = text.split()
+              
+              max_words = 8 # Limit to 8 words to guarantee max 2 lines
+              
+              if len(words) <= max_words:
+                  new_blocks.append(block)
+                  continue
+                  
+              t_start, t_end = times.split(' --> ')
+              
+              # Time parsing helpers
+              def parse_t(t):
+                  h, m, s = t.split(':')
+                  s, ms = s.split('.')
+                  return int(h)*3600000 + int(m)*60000 + int(s)*1000 + int(ms)
+              def format_t(ms):
+                  h = int(ms // 3600000)
+                  ms %= 3600000
+                  m = int(ms // 60000)
+                  ms %= 60000
+                  s = int(ms // 1000)
+                  ms %= 1000
+                  return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+                  
+              start_ms = parse_t(t_start)
+              end_ms = parse_t(t_end)
+              duration = end_ms - start_ms
+              time_per_word = duration / len(words)
+              
+              curr_start = start_ms
+              for i in range(0, len(words), max_words):
+                  chunk_words = words[i:i+max_words]
+                  chunk_text = " ".join(chunk_words)
+                  chunk_duration = time_per_word * len(chunk_words)
+                  curr_end = curr_start + chunk_duration
+                  new_blocks.append(f"{format_t(curr_start)} --> {format_t(curr_end)}\n{chunk_text}")
+                  curr_start = curr_end
+                  
+          with open('subtitles_fixed.vtt', 'w', encoding='utf-8') as f:
+              f.write("\n\n".join(new_blocks))
+          EOF
+          python fix_subs.py
+
       - name: Render Video with Subtitles (FFmpeg)
         # 1. FontSize=14 reduces the text size as requested
         # 2. BorderStyle=3 converts the text outline into a solid background box
@@ -103,7 +163,7 @@ jobs:
         # 5. MarginL=80 and MarginR=80 squeeze the text width to force 2-line wrapping
         run: |
           ffmpeg -stream_loop -1 -i background.webm -i audio.mp3 -vf \
-          "format=yuv420p,subtitles=subtitles.vtt:force_style='Fontname=DejaVu Sans,FontSize=14,Alignment=2,MarginV=40,MarginL=80,MarginR=80,PrimaryColour=&H00FFFFFF,BackColour=&H00000000,BorderStyle=3,Outline=6,Shadow=0'" \
+          "format=yuv420p,subtitles=subtitles_fixed.vtt:force_style='Fontname=DejaVu Sans,FontSize=12,Alignment=2,MarginV=40,MarginL=80,MarginR=80,PrimaryColour=&H00FFFFFF,BackColour=&H00000000,BorderStyle=3,Outline=6,Shadow=0'" \
           -c:v libx264 -c:a aac -shortest -y output.mp4
 
       - name: Upload for Meta & Get Raw URL
