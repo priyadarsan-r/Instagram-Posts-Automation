@@ -218,6 +218,14 @@ jobs:
           VIDEO_URL: ${{ steps.upload.outputs.url }}
           N8N_WEBHOOK: ${{ github.event.client_payload.webhook_url }}
         run: |
-          curl -X POST -H "Content-Type: application/json" \
-            -d "{\"video_url\": \"$VIDEO_URL\", \"status\": \"success\"}" \
-            "$N8N_WEBHOOK"
+          if [ -z "$N8N_WEBHOOK" ]; then echo "::error::webhook_url missing from client_payload"; exit 1; fi
+          for i in 1 2 3 4 5; do
+            CODE=$(curl -sS -o resp.txt -w "%{http_code}" -X POST \
+              -H "Content-Type: application/json" \
+              --data "$(jq -n --arg u "$VIDEO_URL" '{video_url:$u, status:"success"}')" \
+              "$N8N_WEBHOOK")
+            echo "attempt $i -> $CODE"; cat resp.txt
+            [ "$CODE" -lt 300 ] && exit 0
+            sleep 10
+          done
+          exit 1
