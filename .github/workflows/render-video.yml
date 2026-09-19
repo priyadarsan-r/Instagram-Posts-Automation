@@ -205,12 +205,19 @@ jobs:
       #     echo "url=$DIRECT_URL" >> $GITHUB_OUTPUT
       - name: Upload for Meta & Get Raw URL
         id: upload
-        # Uploads to catbox.moe for a permanent, bot-friendly direct download link
+        # Uploads to Discord's CDN which is trusted by Meta and blazing fast
         run: |
-          UPLOAD_URL=$(curl -s -F "reqtype=fileupload" -F "fileToUpload=@output.mp4" https://catbox.moe/user/api.php)
+          # Replace this with your actual Discord Webhook URL, but keep ?wait=true at the end
+          WEBHOOK_URL="https://discord.com/api/webhooks/1550962191023476756/2sK9m6-8jGy1LyxInE5FRblrK-ZIvYdffKzhxV3T5D-_sw7bkaxiePRsek58WqL9yjJh?wait=true"
           
-          echo "Video hosted at: $UPLOAD_URL"
-          echo "url=$UPLOAD_URL" >> $GITHUB_OUTPUT
+          # POST the file to Discord
+          UPLOAD_RES=$(curl -s -F "file=@output.mp4" $WEBHOOK_URL)
+          
+          # Parse the response to extract the direct CDN URL
+          DIRECT_URL=$(echo $UPLOAD_RES | jq -r '.attachments[0].url')
+          
+          echo "Video hosted on Discord CDN at: $DIRECT_URL"
+          echo "url=$DIRECT_URL" >> $GITHUB_OUTPUT
 
       # - name: Ping n8n Webhook
       #   # Sends the direct video URL back to the waiting n8n node
