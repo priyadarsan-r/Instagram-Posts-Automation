@@ -96,14 +96,14 @@ jobs:
           mv *.webm background.webm
 
       - name: Render Video with Subtitles (FFmpeg)
-        # 1. -stream_loop -1 loops the background video if it's shorter than the audio
-        # 2. format=yuv420p ensures Meta/Instagram accepts the file
-        # 3. subtitles=subtitles.vtt burns the generated text into the video
-        # 4. force_style is adjusted: FontSize=24 and MarginV=40 keeps it readable at the bottom
-        # 5. -shortest cuts the video exactly when the audio finishes
+        # 1. FontSize=14 reduces the text size as requested
+        # 2. BorderStyle=3 converts the text outline into a solid background box
+        # 3. BackColour=&H00000000 sets the box to solid black
+        # 4. Outline=6 adds padding inside the black box so text doesn't touch the edges
+        # 5. MarginL=80 and MarginR=80 squeeze the text width to force 2-line wrapping
         run: |
           ffmpeg -stream_loop -1 -i background.webm -i audio.mp3 -vf \
-          "format=yuv420p,subtitles=subtitles.vtt:force_style='Fontname=DejaVu Sans,FontSize=24,Alignment=2,MarginV=40,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2'" \
+          "format=yuv420p,subtitles=subtitles.vtt:force_style='Fontname=DejaVu Sans,FontSize=14,Alignment=2,MarginV=40,MarginL=80,MarginR=80,PrimaryColour=&H00FFFFFF,BackColour=&H00000000,BorderStyle=3,Outline=6,Shadow=0'" \
           -c:v libx264 -c:a aac -shortest -y output.mp4
 
       - name: Upload for Meta & Get Raw URL
