@@ -193,16 +193,24 @@ jobs:
           "format=yuv420p,subtitles=subtitles_fixed.vtt:force_style='Fontname=DejaVu Sans,FontSize=12,Alignment=2,MarginV=40,MarginL=80,MarginR=80,PrimaryColour=&H00FFFFFF,BackColour=&H00000000,BorderStyle=3,Outline=6,Shadow=0'" \
           -c:v libx264 -c:a aac -shortest -y output.mp4
 
+      # - name: Upload for Meta & Get Raw URL
+      #   id: upload
+      #   # Uploads to tmpfiles.org for a free, temporary direct download link
+      #   run: |
+      #     UPLOAD_RES=$(curl -s -F "file=@output.mp4" https://tmpfiles.org/api/v1/upload)
+      #     PAGE_URL=$(echo $UPLOAD_RES | jq -r '.data.url')
+      #     DIRECT_URL="${PAGE_URL/tmpfiles.org\//tmpfiles.org/dl/}"
+          
+      #     echo "Video temporarily hosted at: $DIRECT_URL"
+      #     echo "url=$DIRECT_URL" >> $GITHUB_OUTPUT
       - name: Upload for Meta & Get Raw URL
         id: upload
-        # Uploads to tmpfiles.org for a free, temporary direct download link
+        # Uploads to catbox.moe for a permanent, bot-friendly direct download link
         run: |
-          UPLOAD_RES=$(curl -s -F "file=@output.mp4" https://tmpfiles.org/api/v1/upload)
-          PAGE_URL=$(echo $UPLOAD_RES | jq -r '.data.url')
-          DIRECT_URL="${PAGE_URL/tmpfiles.org\//tmpfiles.org/dl/}"
+          UPLOAD_URL=$(curl -s -F "reqtype=fileupload" -F "fileToUpload=@output.mp4" https://catbox.moe/user/api.php)
           
-          echo "Video temporarily hosted at: $DIRECT_URL"
-          echo "url=$DIRECT_URL" >> $GITHUB_OUTPUT
+          echo "Video hosted at: $UPLOAD_URL"
+          echo "url=$UPLOAD_URL" >> $GITHUB_OUTPUT
 
       # - name: Ping n8n Webhook
       #   # Sends the direct video URL back to the waiting n8n node
