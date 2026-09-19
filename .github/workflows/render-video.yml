@@ -52,7 +52,7 @@ jobs:
         # 4. format=yuv420p ensures Meta/Instagram accepts the file
         # 5. -shortest cuts the video exactly when the audio finishes
         run: |
-          ffmpeg -loop 1 -i bg.jpg -i avatar.png -i audio.mp3 -filter_complex \
+          ffmpeg -loop 1 -i bg.JPG -i avatar.png -i audio.mp3 -filter_complex \
           "[1:v]scale=350:350[ava]; \
            [0:v][ava]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]" \
           -map "[v]" -map 2:a -c:v libx264 -c:a aac -shortest -y output.mp4
