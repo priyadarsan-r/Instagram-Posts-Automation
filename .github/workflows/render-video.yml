@@ -204,12 +204,20 @@ jobs:
           echo "Video temporarily hosted at: $DIRECT_URL"
           echo "url=$DIRECT_URL" >> $GITHUB_OUTPUT
 
+      # - name: Ping n8n Webhook
+      #   # Sends the direct video URL back to the waiting n8n node
+      #   env:
+      #     VIDEO_URL: ${{ steps.upload.outputs.url }}
+      #   run: |
+      #     N8N_URL=$(cat webhook.txt)
+      #     curl -X POST -H "Content-Type: application/json" \
+      #       -d "{\"video_url\": \"$VIDEO_URL\", \"status\": \"success\"}" \
+      #       $N8N_URL
       - name: Ping n8n Webhook
-        # Sends the direct video URL back to the waiting n8n node
         env:
           VIDEO_URL: ${{ steps.upload.outputs.url }}
+          N8N_WEBHOOK: ${{ github.event.client_payload.webhook_url }}
         run: |
-          N8N_URL=$(cat webhook.txt)
           curl -X POST -H "Content-Type: application/json" \
             -d "{\"video_url\": \"$VIDEO_URL\", \"status\": \"success\"}" \
-            $N8N_URL
+            "$N8N_WEBHOOK"
