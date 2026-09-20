@@ -181,9 +181,9 @@ jobs:
       - name: Render Video with Modern Subtitles (FFmpeg)
         run: |
           # The font is now Bold, Yellow text (&H0000FFFF), with a heavy Black outline (&H00000000), 
-          # size doubled, and pushed up higher (MarginV=250) into the center-bottom to avoid the Meta/TikTok UI.
+          # size doubled, and pushed up higher (MarginV=40) into the center-bottom to avoid the Meta/TikTok UI.
           ffmpeg -stream_loop -1 -i background.mp4 -i audio.mp3 -vf \
-          "format=yuv420p,subtitles=subtitles_fixed.vtt:force_style='Fontname=DejaVu Sans,Bold=-1,FontSize=24,Alignment=2,MarginV=250,MarginL=50,MarginR=50,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=4,Shadow=2'" \
+          "format=yuv420p,subtitles=subtitles_fixed.vtt:force_style='Fontname=DejaVu Sans,Bold=-1,FontSize=12,Alignment=2,MarginV=40,MarginL=50,MarginR=50,PrimaryColour=&H0000FFFF,BackColour=&H00000000,OutlineColour=&H00000000,BorderStyle=1,Outline=4,Shadow=2'" \
           -c:v libx264 -c:a aac -shortest -y output.mp4
 
       - name: Upload for Meta & Get Raw URL
