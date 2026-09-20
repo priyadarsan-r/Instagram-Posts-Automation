@@ -57,9 +57,12 @@ jobs:
           (async () => {
             const targetUrl = process.argv[2] || 'https://github.com';
             const browser = await chromium.launch({ headless: true });
+            
+            // Added colorScheme: 'dark' to force GitHub into Dark Mode
             const context = await browser.newContext({
               viewport: { width: 1080, height: 1920 }, // 9:16 vertical video
-              recordVideo: { dir: './', size: { width: 1080, height: 1920 } }
+              recordVideo: { dir: './', size: { width: 1080, height: 1920 } },
+              colorScheme: 'dark'
             });
             const page = await context.newPage();
             
