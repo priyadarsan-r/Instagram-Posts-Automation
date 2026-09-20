@@ -67,6 +67,9 @@ jobs:
             const page = await context.newPage();
             await page.goto(targetUrl, { waitUntil: 'networkidle' });
             
+            // Capture a screenshot of the top of the repository to use as the cover image
+            await page.screenshot({ path: 'cover.jpg' });
+            
             await page.evaluate(async () => {
               await new Promise((resolve) => {
                 let totalHeight = 0;
@@ -99,145 +102,112 @@ jobs:
         run: |
           cat << 'EOF' > fix_subs.py
           import re
-          
+
           with open('subtitles.vtt', 'r', encoding='utf-8') as f:
               content = f.read()
-              
+
           blocks = re.split(r'\n\n+', content.strip())
           new_blocks = [blocks[0]] # Keep WEBVTT header
           
+          all_words = []
+
+          def parse_t(t):
+              parts = t.strip().split(':')
+              if len(parts) == 2:
+                  h, m, s = 0, parts[0], parts[1]
+              else:
+                  h, m, s = parts
+              ms = "0"
+              if '.' in s:
+                  s, ms = s.split('.')
+              elif ',' in s:
+                  s, ms = s.split(',')
+              return int(h)*3600000 + int(m)*60000 + int(s)*1000 + int(ms)
+
+          def format_t(ms):
+              ms = int(ms)
+              h = ms // 3600000; ms %= 3600000
+              m = ms // 60000; ms %= 60000
+              s = ms // 1000; ms %= 1000
+              return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+          # Extract every word and approximate its exact timing
           for block in blocks[1:]:
               lines = block.split('\n')
-              
-              # Find the timestamp line safely
               time_idx = -1
               for i, line in enumerate(lines):
                   if '-->' in line:
                       time_idx = i
                       break
-                      
-              # If no timestamp found, keep block as is (e.g., metadata)
-              if time_idx == -1:
-                  new_blocks.append(block)
-                  continue
-                  
+              if time_idx == -1: continue
+              
               times = lines[time_idx]
               text = " ".join(lines[time_idx+1:]).replace('\n', ' ')
               words = text.split()
+              if not words: continue
               
-              max_words = 8 # Limit to 8 words
-              
-              if len(words) <= max_words:
-                  new_blocks.append(block)
-                  continue
-                  
               t_start, t_end = times.split(' --> ')
-              
-              # Robust Time Parsing Helper
-              def parse_t(t):
-                  parts = t.strip().split(':')
-                  
-                  # Handle missing hours (MM:SS) vs (HH:MM:SS)
-                  if len(parts) == 2:
-                      h, m, s = 0, parts[0], parts[1]
-                  else:
-                      h, m, s = parts
-                      
-                  ms = "0"
-                  # Safely handle missing milliseconds
-                  if '.' in s:
-                      s, ms = s.split('.')
-                  elif ',' in s:
-                      s, ms = s.split(',')
-                      
-                  return int(h)*3600000 + int(m)*60000 + int(s)*1000 + int(ms)
-                  
-              def format_t(ms):
-                  ms = int(ms) # <-- FIX: Force the float back to an integer
-                  h = ms // 3600000
-                  ms %= 3600000
-                  m = ms // 60000
-                  ms %= 60000
-                  s = ms // 1000
-                  ms %= 1000
-                  return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
-                  
               start_ms = parse_t(t_start)
               end_ms = parse_t(t_end)
-              duration = end_ms - start_ms
-              time_per_word = duration / max(len(words), 1)
+              time_per_word = (end_ms - start_ms) / len(words)
               
-              curr_start = start_ms
-              for i in range(0, len(words), max_words):
-                  chunk_words = words[i:i+max_words]
-                  chunk_text = " ".join(chunk_words)
-                  chunk_duration = time_per_word * len(chunk_words)
-                  curr_end = curr_start + chunk_duration
-                  
-                  new_blocks.append(f"{format_t(curr_start)} --> {format_t(curr_end)}\n{chunk_text}")
-                  curr_start = curr_end
-                  
+              for i, w in enumerate(words):
+                  w_start = start_ms + (i * time_per_word)
+                  w_end = w_start + time_per_word
+                  all_words.append({"word": w, "start": w_start, "end": w_end})
+
+          # Repackage into strict chunks of exactly 8 words
+          max_words = 8
+          for i in range(0, len(all_words), max_words):
+              chunk = all_words[i:i+max_words]
+              chunk_start = format_t(chunk[0]["start"])
+              chunk_end = format_t(chunk[-1]["end"])
+              chunk_text = " ".join([w["word"] for w in chunk])
+              new_blocks.append(f"{chunk_start} --> {chunk_end}\n{chunk_text}")
+
           with open('subtitles_fixed.vtt', 'w', encoding='utf-8') as f:
               f.write("\n\n".join(new_blocks))
           EOF
           python fix_subs.py
 
       - name: Render Video with Subtitles (FFmpeg)
-        # 1. FontSize=14 reduces the text size as requested
-        # 2. BorderStyle=3 converts the text outline into a solid background box
-        # 3. BackColour=&H00000000 sets the box to solid black
-        # 4. Outline=6 adds padding inside the black box so text doesn't touch the edges
-        # 5. MarginL=80 and MarginR=80 squeeze the text width to force 2-line wrapping
         run: |
           ffmpeg -stream_loop -1 -i background.webm -i audio.mp3 -vf \
           "format=yuv420p,subtitles=subtitles_fixed.vtt:force_style='Fontname=DejaVu Sans,FontSize=12,Alignment=2,MarginV=40,MarginL=80,MarginR=80,PrimaryColour=&H00FFFFFF,BackColour=&H00000000,BorderStyle=3,Outline=6,Shadow=0'" \
           -c:v libx264 -c:a aac -shortest -y output.mp4
 
-      # - name: Upload for Meta & Get Raw URL
-      #   id: upload
-      #   # Uploads to tmpfiles.org for a free, temporary direct download link
-      #   run: |
-      #     UPLOAD_RES=$(curl -s -F "file=@output.mp4" https://tmpfiles.org/api/v1/upload)
-      #     PAGE_URL=$(echo $UPLOAD_RES | jq -r '.data.url')
-      #     DIRECT_URL="${PAGE_URL/tmpfiles.org\//tmpfiles.org/dl/}"
-          
-      #     echo "Video temporarily hosted at: $DIRECT_URL"
-      #     echo "url=$DIRECT_URL" >> $GITHUB_OUTPUT
       - name: Upload for Meta & Get Raw URL
         id: upload
         # Uploads to Discord's CDN which is trusted by Meta and blazing fast
         run: |
-          # Replace this with your actual Discord Webhook URL, but keep ?wait=true at the end
+          # Replace this with your actual Discord Webhook URL, keeping ?wait=true at the end
           WEBHOOK_URL="https://discord.com/api/webhooks/1550962191023476756/2sK9m6-8jGy1LyxInE5FRblrK-ZIvYdffKzhxV3T5D-_sw7bkaxiePRsek58WqL9yjJh?wait=true"
           
-          # POST the file to Discord
-          UPLOAD_RES=$(curl -s -F "file=@output.mp4" $WEBHOOK_URL)
+          # Upload Video
+          UPLOAD_RES_VID=$(curl -s -F "file=@output.mp4" $WEBHOOK_URL)
+          VIDEO_URL=$(echo $UPLOAD_RES_VID | jq -r '.attachments[0].url')
+          echo "Video hosted on Discord CDN at: $VIDEO_URL"
           
-          # Parse the response to extract the direct CDN URL
-          DIRECT_URL=$(echo $UPLOAD_RES | jq -r '.attachments[0].url')
+          # Upload Cover Image
+          UPLOAD_RES_IMG=$(curl -s -F "file=@cover.jpg" $WEBHOOK_URL)
+          COVER_URL=$(echo $UPLOAD_RES_IMG | jq -r '.attachments[0].url')
+          echo "Cover Image hosted on Discord CDN at: $COVER_URL"
           
-          echo "Video hosted on Discord CDN at: $DIRECT_URL"
-          echo "url=$DIRECT_URL" >> $GITHUB_OUTPUT
+          # Set outputs for the next step
+          echo "video_url=$VIDEO_URL" >> $GITHUB_OUTPUT
+          echo "cover_url=$COVER_URL" >> $GITHUB_OUTPUT
 
-      # - name: Ping n8n Webhook
-      #   # Sends the direct video URL back to the waiting n8n node
-      #   env:
-      #     VIDEO_URL: ${{ steps.upload.outputs.url }}
-      #   run: |
-      #     N8N_URL=$(cat webhook.txt)
-      #     curl -X POST -H "Content-Type: application/json" \
-      #       -d "{\"video_url\": \"$VIDEO_URL\", \"status\": \"success\"}" \
-      #       $N8N_URL
       - name: Ping n8n Webhook
         env:
-          VIDEO_URL: ${{ steps.upload.outputs.url }}
+          VIDEO_URL: ${{ steps.upload.outputs.video_url }}
+          COVER_URL: ${{ steps.upload.outputs.cover_url }}
           N8N_WEBHOOK: ${{ github.event.client_payload.webhook_url }}
         run: |
           if [ -z "$N8N_WEBHOOK" ]; then echo "::error::webhook_url missing from client_payload"; exit 1; fi
           for i in 1 2 3 4 5; do
             CODE=$(curl -sS -o resp.txt -w "%{http_code}" -X POST \
               -H "Content-Type: application/json" \
-              --data "$(jq -n --arg u "$VIDEO_URL" '{video_url:$u, status:"success"}')" \
+              --data "$(jq -n --arg v "$VIDEO_URL" --arg c "$COVER_URL" '{video_url:$v, cover_url:$c, status:"success"}')" \
               "$N8N_WEBHOOK")
             echo "attempt $i -> $CODE"; cat resp.txt
             [ "$CODE" -lt 300 ] && exit 0
