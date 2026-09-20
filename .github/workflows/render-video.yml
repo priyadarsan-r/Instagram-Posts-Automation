@@ -24,20 +24,17 @@ jobs:
           node-version: '18'
 
       - name: Install System & Media Dependencies
-        # FFmpeg handles video, edge-tts handles audio, jq parses JSON, fonts-dejavu for subtitles
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq fonts-dejavu
           pip install edge-tts
 
       - name: Install Playwright
-        # Playwright and its browser dependencies for screen recording
         run: |
           npm install playwright
           npx playwright install --with-deps chromium
 
       - name: Extract n8n Payload
-        # Grabs the data sent from your n8n HTTP Request node
         env:
           SCRIPT: ${{ github.event.client_payload.script }}
           REPO_URL: ${{ github.event.client_payload.repo_url }}
@@ -48,15 +45,15 @@ jobs:
           echo "$N8N_WEBHOOK" > webhook.txt
 
       - name: Synthesize Voiceover & Subtitles
-        # Generates the MP3 audio AND a matching WebVTT subtitle file
         run: |
           edge-tts --voice "en-US-ChristopherNeural" --text "$(cat script.txt)" --write-media audio.mp3 --write-subtitles subtitles.vtt
 
       - name: Generate Playwright Script
-        # Creates the scrolling script dynamically so you don't need a separate repo file
         run: |
           cat << 'EOF' > record-scroll.js
           const { chromium } = require('playwright');
+          const fs = require('fs');
+
           (async () => {
             const targetUrl = process.argv[2] || 'https://github.com';
             const browser = await chromium.launch({ headless: true });
@@ -65,7 +62,14 @@ jobs:
               recordVideo: { dir: './', size: { width: 1080, height: 1920 } }
             });
             const page = await context.newPage();
+            
+            // Measure how long the page takes to load
+            const startTime = Date.now();
             await page.goto(targetUrl, { waitUntil: 'networkidle' });
+            
+            // Calculate load time in seconds and add a 0.5s buffer
+            const loadTimeSeconds = ((Date.now() - startTime) / 1000) + 0.5;
+            fs.writeFileSync('trim_time.txt', loadTimeSeconds.toString());
             
             // Capture a screenshot of the top of the repository to use as the cover image
             await page.screenshot({ path: 'cover.jpg' });
@@ -93,12 +97,16 @@ jobs:
 
       - name: Record Scrolling Background
         run: |
-          # Run the generated script with the repo URL
           node record-scroll.js "$(cat repo.txt)"
-          # Playwright saves a randomly named .webm file, rename it for ffmpeg
-          mv *.webm background.webm
+          
+          mv *.webm raw_background.webm
+          
+          TRIM_TIME=$(cat trim_time.txt)
+          echo "Trimming the first $TRIM_TIME seconds (white screen)..."
+          
+          ffmpeg -i raw_background.webm -ss $TRIM_TIME -c:v libx264 -preset fast -crf 23 background.mp4
 
-      - name: Limit Subtitle Length (Python)
+      - name: Limit Subtitle Length for TikTok Style (Python)
         run: |
           cat << 'EOF' > fix_subs.py
           import re
@@ -156,8 +164,8 @@ jobs:
                   w_end = w_start + time_per_word
                   all_words.append({"word": w, "start": w_start, "end": w_end})
 
-          # Repackage into strict chunks of exactly 8 words
-          max_words = 8
+          # REPACKAGED FOR TIKTOK STYLE: Max 3 words per screen to make it snappy
+          max_words = 3
           for i in range(0, len(all_words), max_words):
               chunk = all_words[i:i+max_words]
               chunk_start = format_t(chunk[0]["start"])
@@ -170,30 +178,27 @@ jobs:
           EOF
           python fix_subs.py
 
-      - name: Render Video with Subtitles (FFmpeg)
+      - name: Render Video with Modern Subtitles (FFmpeg)
         run: |
-          ffmpeg -stream_loop -1 -i background.webm -i audio.mp3 -vf \
-          "format=yuv420p,subtitles=subtitles_fixed.vtt:force_style='Fontname=DejaVu Sans,FontSize=12,Alignment=2,MarginV=40,MarginL=80,MarginR=80,PrimaryColour=&H00FFFFFF,BackColour=&H00000000,BorderStyle=3,Outline=6,Shadow=0'" \
+          # The font is now Bold, Yellow text (&H0000FFFF), with a heavy Black outline (&H00000000), 
+          # size doubled, and pushed up higher (MarginV=250) into the center-bottom to avoid the Meta/TikTok UI.
+          ffmpeg -stream_loop -1 -i background.mp4 -i audio.mp3 -vf \
+          "format=yuv420p,subtitles=subtitles_fixed.vtt:force_style='Fontname=DejaVu Sans,Bold=-1,FontSize=24,Alignment=2,MarginV=250,MarginL=50,MarginR=50,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=4,Shadow=2'" \
           -c:v libx264 -c:a aac -shortest -y output.mp4
 
       - name: Upload for Meta & Get Raw URL
         id: upload
-        # Uploads to Discord's CDN which is trusted by Meta and blazing fast
         run: |
-          # Replace this with your actual Discord Webhook URL, keeping ?wait=true at the end
           WEBHOOK_URL="https://discord.com/api/webhooks/1550962191023476756/2sK9m6-8jGy1LyxInE5FRblrK-ZIvYdffKzhxV3T5D-_sw7bkaxiePRsek58WqL9yjJh?wait=true"
           
-          # Upload Video
           UPLOAD_RES_VID=$(curl -s -F "file=@output.mp4" $WEBHOOK_URL)
           VIDEO_URL=$(echo $UPLOAD_RES_VID | jq -r '.attachments[0].url')
           echo "Video hosted on Discord CDN at: $VIDEO_URL"
           
-          # Upload Cover Image
           UPLOAD_RES_IMG=$(curl -s -F "file=@cover.jpg" $WEBHOOK_URL)
           COVER_URL=$(echo $UPLOAD_RES_IMG | jq -r '.attachments[0].url')
           echo "Cover Image hosted on Discord CDN at: $COVER_URL"
           
-          # Set outputs for the next step
           echo "video_url=$VIDEO_URL" >> $GITHUB_OUTPUT
           echo "cover_url=$COVER_URL" >> $GITHUB_OUTPUT
 
