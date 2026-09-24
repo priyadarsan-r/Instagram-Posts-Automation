@@ -1,4 +1,4 @@
-name: n8n Viral Video Renderer
+name: n8n Video Renderer
 
 # Listens for a POST request from your n8n workflow
 on:
@@ -38,20 +38,17 @@ jobs:
         env:
           SCRIPT: ${{ github.event.client_payload.script }}
           REPO_URL: ${{ github.event.client_payload.repo_url }}
-          REPO_NAME: ${{ github.event.client_payload.repo_name }}
           N8N_WEBHOOK: ${{ github.event.client_payload.webhook_url }}
         run: |
           echo "$SCRIPT" > script.txt
           echo "$REPO_URL" > repo.txt
-          echo "$REPO_NAME" > repo_name.txt
           echo "$N8N_WEBHOOK" > webhook.txt
 
-      - name: Synthesize Fast-Paced Voiceover & Subtitles
-        # Added --rate=+15% to make the audio fast and authoritative (Phase 1 rule)
+      - name: Synthesize Voiceover & Subtitles
         run: |
-          edge-tts --voice "en-US-ChristopherNeural" --rate=+15% --text "$(cat script.txt)" --write-media audio.mp3 --write-subtitles subtitles.vtt
+          edge-tts --voice "en-US-ChristopherNeural" --text "$(cat script.txt)" --write-media audio.mp3 --write-subtitles subtitles.vtt
 
-      - name: Generate Viral Playwright Script
+      - name: Generate Playwright Script
         run: |
           cat << 'EOF' > record-scroll.js
           const { chromium } = require('playwright');
@@ -59,9 +56,9 @@ jobs:
 
           (async () => {
             const targetUrl = process.argv[2] || 'https://github.com';
-            const repoName = process.argv[3] || 'This Repository';
             const browser = await chromium.launch({ headless: true });
             
+            // Added colorScheme: 'dark' to force GitHub into Dark Mode
             const context = await browser.newContext({
               viewport: { width: 1080, height: 1920 }, // 9:16 vertical video
               recordVideo: { dir: './', size: { width: 1080, height: 1920 } },
@@ -69,73 +66,33 @@ jobs:
             });
             const page = await context.newPage();
             
+            // Measure how long the page takes to load
             const startTime = Date.now();
             await page.goto(targetUrl, { waitUntil: 'networkidle' });
             
+            // Calculate load time in seconds and add a 0.5s buffer
             const loadTimeSeconds = ((Date.now() - startTime) / 1000) + 0.5;
             fs.writeFileSync('trim_time.txt', loadTimeSeconds.toString());
+            
+            // Capture a screenshot of the top of the repository to use as the cover image
             await page.screenshot({ path: 'cover.jpg' });
             
-            // PHASE 1 & 2: The Hook & Flaw (Inject a minimalist "hacker/tech" intro over the page)
-            await page.evaluate((name) => {
-              const intro = document.createElement('div');
-              intro.id = 'viral-intro';
-              intro.innerHTML = `
-                <div style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:#0d1117; z-index:999999; display:flex; flex-direction:column; justify-content:center; align-items:center; color:#00ff00; font-family:monospace; font-size:40px; text-align:center; padding:50px;">
-                  <span style="color:#ff4444; font-size:60px; margin-bottom:20px; font-weight:bold;">[ TRADITIONAL TOOLS DETECTED ]</span>
-                  <span style="color:#8b949e; font-size:35px;">Slow. Expensive. Outdated.</span><br>
-                  <span style="color:#58a6ff; font-size:50px; margin-top:60px;">INITIALIZING OPEN-SOURCE ALTERNATIVE:</span>
-                  <span style="color:#fff; font-size:90px; font-weight:900; text-transform:uppercase; margin-top:20px;">${name}</span>
-                </div>
-              `;
-              document.body.appendChild(intro);
-            }, repoName);
-
-            // Hold the intro screen for 9 seconds (Matches David vs Goliath & Flaw timing)
-            await page.waitForTimeout(9000);
-
-            // PHASE 3: Rapid-Fire Solution (Remove intro, scroll aggressively fast)
-            await page.evaluate(() => {
-              const intro = document.getElementById('viral-intro');
-              if(intro) intro.remove();
-            });
-
             await page.evaluate(async () => {
               await new Promise((resolve) => {
                 let totalHeight = 0;
-                const distance = 15; // Faster, aggressive scroll distance
+                const distance = 5; 
                 const timer = setInterval(() => {
+                  const scrollHeight = document.body.scrollHeight;
                   window.scrollBy(0, distance);
                   totalHeight += distance;
-                  if (totalHeight >= document.body.scrollHeight || totalHeight >= 15000) {
+                  // Stop after ~60 seconds or end of page
+                  if (totalHeight >= scrollHeight || totalHeight >= (distance * 3000)) {
                     clearInterval(timer);
                     resolve();
                   }
-                }, 16);
+                }, 20);
               });
             });
-
-            // Snap back to top to show activity
-            await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
-            await page.waitForTimeout(2000);
-
-            // PHASE 4: The Bribe / CTA (Inject massive Call to Action overlay for the end of the video)
-            await page.evaluate(() => {
-              const cta = document.createElement('div');
-              cta.innerHTML = `
-                <div style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(13,17,23,0.96); z-index:999999; display:flex; flex-direction:column; justify-content:center; align-items:center; color:white; font-family:-apple-system, BlinkMacSystemFont, sans-serif; text-align:center;">
-                  <div style="font-size:100px; font-weight:900; margin-bottom:40px; color:#58a6ff;">COMMENT THE WORD</div>
-                  <div style="font-size:220px; font-weight:900; background:white; color:black; padding:20px 80px; border-radius:40px; margin-bottom:50px;">"LINK"</div>
-                  <div style="font-size:70px; font-weight:bold;">TO GET THE DIRECT REPO</div>
-                  <div style="font-size:50px; color:#8b949e; margin-top:60px; font-weight:bold;">+ Follow us to receive the DM</div>
-                </div>
-              `;
-              document.body.appendChild(cta);
-            });
-
-            // Hold the CTA screen so it covers the rest of the audio duration
-            await page.waitForTimeout(15000);
-
             await context.close();
             await browser.close();
           })();
@@ -143,7 +100,7 @@ jobs:
 
       - name: Record Scrolling Background
         run: |
-          node record-scroll.js "$(cat repo.txt)" "$(cat repo_name.txt)"
+          node record-scroll.js "$(cat repo.txt)"
           
           mv *.webm raw_background.webm
           
@@ -210,7 +167,7 @@ jobs:
                   w_end = w_start + time_per_word
                   all_words.append({"word": w, "start": w_start, "end": w_end})
 
-          # REPACKAGED FOR VIRAL STYLE: Max 2-3 words per screen to make it snappy
+          # REPACKAGED FOR TIKTOK STYLE: Max 3 words per screen to make it snappy
           max_words = 3
           for i in range(0, len(all_words), max_words):
               chunk = all_words[i:i+max_words]
@@ -224,12 +181,12 @@ jobs:
           EOF
           python fix_subs.py
 
-      - name: Render Video with Kinetic Typography (FFmpeg)
+      - name: Render Video with Modern Subtitles (FFmpeg)
         run: |
-          # The font is now Massive (FontSize=26) and dead-centered in the middle of the screen (Alignment=5)
-          # We use a bright yellow font with a thick black outline and a shadow to ensure readability on any background
+          # The font is now Bold, Yellow text (&H0000FFFF), with a heavy Black outline (&H00000000), 
+          # size doubled, and pushed up higher (MarginV=40) into the center-bottom to avoid the Meta/TikTok UI.
           ffmpeg -stream_loop -1 -i background.mp4 -i audio.mp3 -vf \
-          "format=yuv420p,subtitles=subtitles_fixed.vtt:force_style='Fontname=DejaVu Sans,Bold=-1,FontSize=26,Alignment=5,MarginV=0,MarginL=50,MarginR=50,PrimaryColour=&H0000FFFF,BackColour=&H00000000,OutlineColour=&H00000000,BorderStyle=1,Outline=5,Shadow=3'" \
+          "format=yuv420p,subtitles=subtitles_fixed.vtt:force_style='Fontname=DejaVu Sans,Bold=-1,FontSize=12,Alignment=2,MarginV=40,MarginL=50,MarginR=50,PrimaryColour=&H0000FFFF,BackColour=&H00000000,OutlineColour=&H00000000,BorderStyle=1,Outline=4,Shadow=1'" \
           -c:v libx264 -c:a aac -shortest -y output.mp4
 
       - name: Upload for Meta & Get Raw URL
@@ -238,11 +195,11 @@ jobs:
           WEBHOOK_URL="https://discord.com/api/webhooks/1550962191023476756/2sK9m6-8jGy1LyxInE5FRblrK-ZIvYdffKzhxV3T5D-_sw7bkaxiePRsek58WqL9yjJh?wait=true"
           
           UPLOAD_RES_VID=$(curl -s -F "file=@output.mp4" $WEBHOOK_URL)
-          VIDEO_URL=$(echo$UPLOAD_RES_VID | jq -r '.attachments[0].url')
+          VIDEO_URL=$(echo $UPLOAD_RES_VID | jq -r '.attachments[0].url')
           echo "Video hosted on Discord CDN at: $VIDEO_URL"
           
           UPLOAD_RES_IMG=$(curl -s -F "file=@cover.jpg" $WEBHOOK_URL)
-          COVER_URL=$(echo$UPLOAD_RES_IMG | jq -r '.attachments[0].url')
+          COVER_URL=$(echo $UPLOAD_RES_IMG | jq -r '.attachments[0].url')
           echo "Cover Image hosted on Discord CDN at: $COVER_URL"
           
           echo "video_url=$VIDEO_URL" >> $GITHUB_OUTPUT
@@ -260,7 +217,7 @@ jobs:
               -H "Content-Type: application/json" \
               --data "$(jq -n --arg v "$VIDEO_URL" --arg c "$COVER_URL" '{video_url:$v, cover_url:$c, status:"success"}')" \
               "$N8N_WEBHOOK")
-            echo "attempt $i ->$CODE"; cat resp.txt
+            echo "attempt $i -> $CODE"; cat resp.txt
             [ "$CODE" -lt 300 ] && exit 0
             sleep 10
           done
